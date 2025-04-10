@@ -256,22 +256,71 @@ impl<P: SchemeParams> AffGProof<P> {
     }
 }
 
+#[cfg(feature = "k256")]
 #[cfg(test)]
 mod tests {
     use manul::{dev::BinaryFormat, session::WireFormat};
     use rand_core::OsRng;
-
+    use wasm_bindgen_test::*;
+    use web_sys::Performance;
+    use crate::params::k256::ProductionParams112;
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+    
     use super::{AffGProof, AffGPublicInputs, AffGSecretInputs};
     use crate::{
-        dev::TestParams,
         paillier::{Ciphertext, RPParams, Randomizer, SecretKeyPaillierWire},
         params::{secret_scalar_from_signed, SchemeParams},
         uint::SecretSigned,
     };
 
-    #[test]
+
+    fn get_performance() -> Option<Performance> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            web_sys::window()
+                .and_then(|window| window.performance())
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            None
+        }
+    }
+
+    fn get_time() -> f64 {
+        if let Some(perf) = get_performance() {
+            perf.now()
+        } else {
+            #[cfg(target_arch = "wasm32")]
+            {
+                // Fallback to Date.now() in WASM environment
+                js_sys::Date::new_0().get_time()
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                // Fallback to std::time in non-WASM environment
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as f64
+            }
+        }
+    }
+
+    fn log_time(test_name: &str, start: f64, end: f64) {
+        #[cfg(target_arch = "wasm32")]
+        {
+            web_sys::console::log_1(&format!("{} test took {} ms", test_name, end - start).into());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            println!("{} test took {} ms", test_name, end - start);
+        }
+    }
+
+    #[wasm_bindgen_test]
     fn prove_and_verify() {
-        type Params = TestParams;
+
+        type Params = ProductionParams112;
         type Paillier = <Params as SchemeParams>::Paillier;
 
         let sk0 = SecretKeyPaillierWire::<Paillier>::random(&mut OsRng).into_precomputed();
@@ -294,7 +343,7 @@ mod tests {
 
         let cap_d = &cap_c * &x + Ciphertext::new_with_randomizer(pk0, &-&y, &rho);
         let cap_y = Ciphertext::new_with_randomizer(pk1, &y, &rho_y);
-        let cap_x = secret_scalar_from_signed::<TestParams>(&x).mul_by_generator();
+        let cap_x = secret_scalar_from_signed::<ProductionParams112>(&x).mul_by_generator();
 
         let secret = AffGSecretInputs {
             x: &x,
@@ -311,12 +360,19 @@ mod tests {
             cap_x: &cap_x,
         };
 
-        let proof = AffGProof::<Params>::new(&mut OsRng, secret, public, &rp_params, &aux);
+        let start = get_time();
 
+        let proof = AffGProof::<Params>::new(&mut OsRng, secret, public, &rp_params, &aux);
+        
+        let end = get_time();
+        log_time("AffGProof::prove_and_verify", start, end);
+        
         // Serialization roundtrip
         let serialized = BinaryFormat::serialize(proof).unwrap();
         let proof = BinaryFormat::deserialize::<AffGProof<Params>>(&serialized).unwrap();
 
         assert!(proof.verify(public, &rp_params, &aux));
+
+
     }
 }

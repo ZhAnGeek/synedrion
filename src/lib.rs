@@ -43,6 +43,7 @@ pub use params::dev;
 #[cfg(test)]
 mod tests;
 
+
 // Some re-exports to avoid the need for version-matching
 #[cfg(feature = "bip32")]
 pub use bip32;
